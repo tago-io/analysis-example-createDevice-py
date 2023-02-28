@@ -95,5 +95,5 @@ def start_analysis(context: list[dict], scope: list[dict]) -> None:
     send_feedback_to_dashboard(account=account, device_id=scope[0]["device"])
 
 
-# The analysis token in only necessary to run the analysis outside TagoIo
+# The analysis token in only necessary to run the analysis outside TagoIO
 Analysis(params={"token": "MY-ANALYSIS-TOKEN-HERE"}).init(start_analysis)
