@@ -1,70 +1,99 @@
-# Analysis Example
-# Creating devices using dashboard
-#
-# Using an Input Widget in the dashboard, you will be able to create devices in your account.
-# You can get the dashboard template to use here: https://admin.tago.io/template/6143555a314cef001871ec78
-# Use a dummy HTTPs device with the dashboard.
-#
-# Environment Variables
-# In order to use this analysis, you must setup the Environment Variable table.
-#   account_token: Your account token. Check bellow how to get this.
-#
-# Steps to generate an account_token:
-# 1 - Enter the following link: https://admin.tago.io/account/
-# 2 - Select your Profile.
-# 3 - Enter Tokens tab.
-# 4 - Generate a new Token with Expires Never.
-# 5 - Press the Copy Button and place at the Environment Variables tab of this analysis.
+"""
+Analysis Example
+Creating devices using dashboard
 
-from tago import Analysis
-from tago import Account
-from tago import Utils
-from tago import Device
+Using an Input Widget in the dashboard, you will be able to create devices in your account.
+You can get the dashboard template to use here: https://admin.tago.io/template/6143555a314cef001871ec78
+Use a dummy HTTPs device with the dashboard.
 
-# The function myAnalysis will run when you execute your analysis
-def myAnalysis(context,scope):
-  account_token = list(filter(lambda account_token: account_token['key'] == 'account_token', context.environment))
-  account_token = account_token[0]['value']
-  if not account_token:
-   return context.log("Missing account_token Environment Variable.")
-  # Instance the Account class
-  my_account = Account(account_token)
-  # Get the token of the settings device used in the dashboard, then instance the device class.
-  # We will use this to send the Validation (feedback) to the dashboard.
-  dashboard_dev_token  = Utils.getTokenByName(my_account,scope[0]["origin"])
-  dashboard_device = Device(dashboard_dev_token)
-  # Get the variables sent by the widget/dashboard.
-  network_id = list(filter(lambda network_id: network_id['variable'] == 'device_network', scope))
-  network_id = network_id[0]['value']
-  connector_id  = list(filter(lambda connector_id : connector_id ['variable'] == 'device_connector', scope))
-  connector_id = connector_id[0]['value']
-  device_name  = list(filter(lambda device_name : device_name ['variable'] == 'device_name', scope))
-  device_name = device_name[0]['value']
-  device_eui   = list(filter(lambda device_eui  : device_eui  ['variable'] == 'device_eui', scope))
-  device_eui = device_eui[0]['value']
-  if not network_id:
-    return context.log('Missing "device_network" in the data scope.')
-  if not connector_id:
-    return context.log('Missing "device_connector" in the data scope.')
-  if not device_name:
-    return context.log('Missing "device_name" in the data scope.')
-  if not device_eui:
-    return context.log('Missing "device_eui" in the data scope.')
-  result = my_account.devices.create({
-    'name': device_name,
-    'serie_number': device_eui,
-    'tags': [
-      { 'key': 'type', 'value': 'sensor' },
-      { 'key': 'device_eui', 'value': device_eui},
-    ],
-    'connector': connector_id,
-    'network': network_id,
-    'active': True,
-  })
-  if not result:
-    dashboard_device.insert({ 'variable': 'validation', 'value': 'Error when creating the device', 'metadata': { 'color': 'red' } })
-  my_account.devices.paramSet(result['result']['device_id'], { 'key': 'param_key', 'value': '10', 'sent': False })
-  dashboard_device.insert({ 'variable': 'validation', 'value': 'Device succesfully created!', 'metadata': { 'type': 'success' } })
-  context.log('Device succesfully created. ID:',result['result']['device_id'])
-# The analysis token in only necessary to run the analysis outside TagoIO
-Analysis('1fa28cb1-1ab3-4d91-b578-7f5d3dc631a9').init(myAnalysis)
+Environment Variables
+In order to use this analysis, you must setup the Environment Variable table.
+  account_token: Your account token. Check bellow how to get this.
+
+Steps to generate an account_token:
+1 - Enter the following link: https://admin.tago.io/account/
+2 - Select your Profile.
+3 - Enter Tokens tab.
+4 - Generate a new Token with Expires Never.
+5 - Press the Copy Button and place at the Environment Variables tab of this analysis.
+"""
+
+from tagoio_sdk import Analysis, Device, Account
+from tagoio_sdk.modules.Utils.getTokenByName import getTokenByName
+from tagoio_sdk.modules.Account.Device_Type import DeviceCreateInfo
+
+
+def add_configuration_parameter_to_device(account: Account, device_id: str) -> None:
+    account.devices.paramSet(
+        deviceID=device_id, configObj={ "key": "param_key", "value": "10", "sent": False }
+    )
+
+
+def send_feedback_to_dashboard(account: Account, device_id: str) -> None:
+    dashboard_token = getTokenByName(account=account, deviceID=device_id)
+    device = Device(params={"token":dashboard_token})
+
+    # To add any data to the device that was just created:
+    # device.sendData({ "variable": "temperature", value: 17 })
+
+    device.sendData(
+        data={"variable": "validation", "value": "Device successfully created!", "metadata": {"type": "success" } }
+    )
+
+
+def parse_new_device(scope: list[dict]) -> DeviceCreateInfo:
+    # Get the variables sent by the widget/dashboard.
+    device_network = [obj for obj in scope if obj["variable"]  == "device_network"]
+    device_connector = [obj for obj in scope if obj["variable"]  == "device_connector"]
+    device_name = [obj for obj in scope if obj["variable"]  == "device_name"]
+    device_eui = [obj for obj in scope if obj["variable"]  == "device_eui"]
+
+    if not device_network or not device_network[0]["value"]:
+        raise TypeError('Missing "device_network" in the data scope.')
+    elif not device_connector or not device_connector[0]["value"]:
+        raise TypeError('Missing "device_connector" in the data scope.')
+    elif not device_eui or not device_eui[0]["value"]:
+        raise TypeError('Missing "device_eui" in the data scope.')
+
+    return {
+        "name": device_name[0]["value"],
+        "serie_number": device_eui[0]["value"],
+        "tags": [
+            # You can add custom tags here.
+            { "key": "type", "value": "sensor" },
+            { "key": "device_eui", "value": device_eui[0]["value"] },
+        ],
+        "connector": device_connector[0]["value"],
+        "network": device_network[0]["value"],
+        "active": True,
+        "type": "immutable",
+        "chunk_period": "month", # consider change
+        "chunk_retention": 1, # consider change
+    }
+
+
+def start_analysis(context: list[dict], scope: list[dict]) -> None:
+    if not scope:
+        return print("The analysis must be triggered by a widget.")
+
+    # reads the value of account_token from the environment variable
+    account_token = list(filter(lambda account_token: account_token["key"] == "account_token", context.environment))
+    account_token = account_token[0]["value"]
+
+    if not account_token:
+        return print("Missing account_token Environment Variable.")
+
+    account = Account(params={"token": account_token})
+
+    new_device = parse_new_device(scope=scope)
+
+    result = account.devices.create(deviceObj=new_device)
+    print(result)
+
+    add_configuration_parameter_to_device(account=account, device_id=result["device_id"])
+
+    send_feedback_to_dashboard(account=account, device_id=scope[0]["device"])
+
+
+# The analysis token in only necessary to run the analysis outside TagoIo
+Analysis(params={"token": "MY-ANALYSIS-TOKEN-HERE"}).init(start_analysis)
