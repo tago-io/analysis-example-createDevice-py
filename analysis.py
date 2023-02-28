@@ -74,27 +74,27 @@ def parse_new_device(scope: list[dict]) -> DeviceCreateInfo:
 
 def start_analysis(context: list[dict], scope: list[dict]) -> None:
     if not scope:
-        return context.log("The analysis must be triggered by a widget.")
+        return print("The analysis must be triggered by a widget.")
 
     # reads the value of account_token from the environment variable
     account_token = list(filter(lambda account_token: account_token["key"] == "account_token", context.environment))
     account_token = account_token[0]["value"]
 
     if not account_token:
-        return context.log("Missing account_token Environment Variable.")
+        return print("Missing account_token Environment Variable.")
 
     account = Account(params={"token": account_token})
 
     new_device = parse_new_device(scope=scope)
 
     result = account.devices.create(deviceObj=new_device)
-    context.log(result)
+    print(result)
 
     add_configuration_parameter_to_device(account=account, device_id=result["device_id"])
 
     send_feedback_to_dashboard(account=account, device_id=scope[0]["device"])
 
-    context.log(f"Device successfully created. ID: {result['device_id']}")
+    print(f"Device successfully created. ID: {result['device_id']}")
 
 
 # The analysis token in only necessary to run the analysis outside TagoIo
