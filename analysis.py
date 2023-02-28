@@ -94,8 +94,6 @@ def start_analysis(context: list[dict], scope: list[dict]) -> None:
 
     send_feedback_to_dashboard(account=account, device_id=scope[0]["device"])
 
-    print(f"Device successfully created. ID: {result['device_id']}")
-
 
 # The analysis token in only necessary to run the analysis outside TagoIo
 Analysis(params={"token": "MY-ANALYSIS-TOKEN-HERE"}).init(start_analysis)
