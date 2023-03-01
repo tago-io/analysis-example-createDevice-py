@@ -1,2 +1,1 @@
-tagoio-sdk>=4.0.5
-aiohttp==3.8.4
+tagoio-sdk>=4.0.10
