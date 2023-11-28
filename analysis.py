@@ -17,58 +17,98 @@ Steps to generate an account_token:
 4 - Generate a new Token with Expires Never.
 5 - Press the Copy Button and place at the Environment Variables tab of this analysis.
 """
+from datetime import datetime, timedelta
 
-from tagoio_sdk import Analysis, Device, Account
-from tagoio_sdk.modules.Utils.getTokenByName import getTokenByName
+from tagoio_sdk import Analysis, Device, Resources
 from tagoio_sdk.modules.Account.Device_Type import DeviceCreateInfo
+from typing import Optional, TypedDict, Literal
+
+validation_type = Literal["success", "danger", "warning"]
 
 
-def add_configuration_parameter_to_device(account: Account, device_id: str) -> None:
-    account.devices.paramSet(
+class IValidateOptions(TypedDict):
+    show_markdown: Optional[bool]
+    user_id: Optional[str]
+
+
+def initialize_validation(validation_variable:str, device_id: str, opts: IValidateOptions = None):
+    tokens = Resources().devices.tokenList(deviceID=device_id)
+    device = Device(params={"token":tokens[0]["token"]})
+
+    if opts is None:
+        opts = {}
+    i = 0
+
+    def _(message: str, type: validation_type = "success"):
+        nonlocal i
+        if not message or not type:
+            raise ValueError("Missing message or type")
+
+        i += 1
+
+        # Clean validation old entries
+        device.deleteData({
+            'variables': validation_variable,
+            'qty': 999,
+            'end_date': (datetime.utcnow() - timedelta(minutes=1)).isoformat()
+        })
+
+        validation_types = ["success", "danger", "warning"]
+
+        # Insert the new entry
+        device.sendData({
+            'variable': validation_variable,
+            'value': message,
+            'time': (datetime.utcnow() + timedelta(milliseconds=i * 200)).isoformat(),
+            'metadata': {
+                'type': type if type in validation_types else None,
+                'color': type if type not in validation_types else None,
+                'show_markdown': bool(opts.get('show_markdown')),
+                'user_id': opts.get('user_id')
+            }
+        })
+
+        return message
+
+    return _
+
+
+def add_configuration_parameter_to_device(device_id: str) -> None:
+    Resources().devices.paramSet(
         deviceID=device_id, configObj={ "key": "param_key", "value": "10", "sent": False }
-    )
-
-
-def send_feedback_to_dashboard(account: Account, device_id: str) -> None:
-    dashboard_token = getTokenByName(account=account, deviceID=device_id)
-    device = Device(params={"token":dashboard_token})
-
-    # To add any data to the device that was just created:
-    # device.sendData({ "variable": "temperature", value: 17 })
-
-    device.sendData(
-        data={"variable": "validation", "value": "Device successfully created!", "metadata": {"type": "success" } }
     )
 
 
 def parse_new_device(scope: list[dict]) -> DeviceCreateInfo:
     # Get the variables sent by the widget/dashboard.
-    device_network = [obj for obj in scope if obj["variable"]  == "device_network"]
-    device_connector = [obj for obj in scope if obj["variable"]  == "device_connector"]
-    device_name = [obj for obj in scope if obj["variable"]  == "device_name"]
-    device_eui = [obj for obj in scope if obj["variable"]  == "device_eui"]
+    device_network = next(filter(lambda payload: payload["variable"] == "device_network", scope), None)
+    device_connector = next(filter(lambda payload: payload["variable"] == "device_connector", scope), None)
+    device_name = next(filter(lambda payload: payload["variable"] == "device_name", scope), None)
+    device_eui = next(filter(lambda payload: payload["variable"] == "device_eui", scope), None)
 
-    if not device_network or not device_network[0]["value"]:
+    if not device_network or not device_network.get("value"):
         raise TypeError('Missing "device_network" in the data scope.')
-    elif not device_connector or not device_connector[0]["value"]:
+    elif not device_connector or not device_connector.get("value"):
         raise TypeError('Missing "device_connector" in the data scope.')
-    elif not device_eui or not device_eui[0]["value"]:
+    elif not device_name or not device_name.get("value"):
+        raise TypeError('Missing "device_name" in the data scope.')
+    elif not device_eui or not device_eui.get("value"):
         raise TypeError('Missing "device_eui" in the data scope.')
 
     return {
-        "name": device_name[0]["value"],
-        "serie_number": device_eui[0]["value"],
+        "name": device_name["value"],
+        "serie_number": device_eui["value"],
         "tags": [
             # You can add custom tags here.
-            { "key": "type", "value": "sensor" },
-            { "key": "device_eui", "value": device_eui[0]["value"] },
+            {"key": "type", "value": "sensor"},
+            {"key": "device_eui", "value": device_eui["value"]},
         ],
-        "connector": device_connector[0]["value"],
-        "network": device_network[0]["value"],
+        "connector": device_connector["value"],
+        "network": device_network["value"],
         "active": True,
         "type": "immutable",
-        "chunk_period": "month", # consider change
-        "chunk_retention": 1, # consider change
+        "chunk_period": "month",  # consider change
+        "chunk_retention": 1,  # consider change
     }
 
 
@@ -76,24 +116,21 @@ def start_analysis(context: list[dict], scope: list[dict]) -> None:
     if not scope:
         return print("The analysis must be triggered by a widget.")
 
-    # reads the value of account_token from the environment variable
-    account_token = list(filter(lambda account_token: account_token["key"] == "account_token", context.environment))
-    account_token = account_token[0]["value"]
-
-    if not account_token:
-        return print("Missing account_token Environment Variable.")
-
-    account = Account(params={"token": account_token})
-
     new_device = parse_new_device(scope=scope)
+    settings_id = scope[0]["device"]
 
-    result = account.devices.create(deviceObj=new_device)
-    print(result)
+    validate = initialize_validation("validation", settings_id)
+    validate("Creating device...", "warning")
 
-    add_configuration_parameter_to_device(account=account, device_id=result["device_id"])
+    try:
+        result = Resources().devices.create(deviceObj=new_device)
+    except Exception as error:
+        return validate(error, "danger")
 
-    send_feedback_to_dashboard(account=account, device_id=scope[0]["device"])
+    add_configuration_parameter_to_device(device_id=result["device_id"])
+
+    validate("Device created successfully!", "success")
 
 
 # The analysis token in only necessary to run the analysis outside TagoIO
-Analysis(params={"token": "MY-ANALYSIS-TOKEN-HERE"}).init(start_analysis)
+Analysis.use(start_analysis, params={"token": "MY-ANALYSIS-TOKEN-HERE"})
